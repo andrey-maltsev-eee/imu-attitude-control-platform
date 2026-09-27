@@ -1,0 +1,32 @@
+MPU-6500 Six-Position Accelerometer Measurements
+Date: 27 September 2026
+
++Z:
+AcX = -544.64
+AcY = 839.68
+AcZ = 15929.92
+
+-Z:
+AcX = -376.18
+AcY = -272.52
+AcZ = -17324.24
+
++X:
+AcX = 16691.52
+AcY = -293.34
+AcZ = -394.18
+
+-X:
+AcX = -16164.04
+AcY = 830.52
+AcZ = -129.92
+
++Y:
+AcX = 639.76
+AcY = 16682.14
+AcZ = -1282.82
+
+-Y:
+AcX = -436.16
+AcY = -16128.82
+AcZ = -935.34
