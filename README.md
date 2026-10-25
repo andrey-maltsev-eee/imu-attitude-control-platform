@@ -1,29 +1,31 @@
-# IMU-Based Attitude Estimation & Control Platform (MPU-6500 / Arduino UNO)
+# One-Axis IMU Tilt Estimation & Sensor Fusion (MPU-6500 / Arduino UNO)
 
-An embedded systems and signal processing project developing a real-time attitude (roll tilt) estimation system on an **Arduino UNO R3** using a 6-axis **MPU-6500 MEMS IMU** over I²C. 
+An introductory first-year EEE embedded sensing and signal-processing project implementing one-axis roll tilt estimation on an **Arduino UNO R3** using a 6-axis **MPU-6500 MEMS IMU** over I²C.
 
-This repository documents the step-by-step engineering progression: hardware identification, six-position static accelerometer calibration, independent holdout tilt validation, gyroscope zero-rate bias compensation, and real-time discrete-time **Complementary Filter** sensor fusion.
+This repository documents the completed estimator milestone: register-level I²C acquisition via Arduino `Wire`, six-position static accelerometer calibration, startup gyroscope zero-rate bias compensation, discrete-time **Complementary Filter** fusion, and Python time-series analysis. Closed-loop servo actuation is scoped as future work.
 
 ---
 
-## 1. Hardware & I²C Configuration
+## 1. Hardware & Electrical Notes
 
-* **Microcontroller:** Arduino UNO R3 (ATmega328P)
-* **Sensor:** InvenSense MPU-6500 6-Axis IMU (`WHO_AM_I` register `0x75` verified as `0x70`, I²C address `0x68`)
-* **Interface:** Direct register-level I²C transactions using `<Wire.h>` (burst reads starting at `ACCEL_XOUT_H` `0x3B`, 16-bit signed two's complement reconstruction) without external black-box sensor libraries.
+* **Microcontroller:** Arduino UNO R3 (`ATmega328P`, 16 MHz)
+* **Sensor Breakout:** Multi-model carrier board marked `MPU-9250/6500/9255`; device identity register `WHO_AM_I` (`0x75`) read as `0x70` (MPU-6500) at I²C address `0x68`.
+* **Interface:** Burst register reads starting at `ACCEL_XOUT_H` (`0x3B`) using `<Wire.h>` and signed 16-bit two's complement decoding, without external IMU libraries.
 
-| MPU-6500 Pin | Arduino UNO Pin | Function |
+| Breakout Pin | Arduino UNO Pin | Function & Electrical Note |
 | :--- | :--- | :--- |
-| `VCC` | `5V` | Power supply (via onboard breakout regulator) |
+| `VCC` | `5V` | Power input to breakout onboard voltage regulator |
 | `GND` | `GND` | Common ground reference |
 | `SDA` | `A4 (SDA)` | I²C Serial Data |
 | `SCL` | `A5 (SCL)` | I²C Serial Clock |
+
+*Electrical compatibility note:* While the breakout's onboard regulator accepts `5V` on `VCC`, the MPU-6500 IC itself is a 3.3V device. Applying 5V logic directly from an Arduino UNO to `SDA`/`SCL` worked in these bench tests but should not be assumed universally safe for all MPU-6500 modules without verifying pull-up rails or level shifting.
 
 ---
 
 ## 2. Six-Position Accelerometer Calibration
 
-Using `firmware/accelerometer_average/accelerometer_average.ino` (averaging $N = 200$ samples per static orientation), raw 16-bit accelerometer readings were recorded across six orthogonal orientations (`data/accelerometer-six-position.txt`) to estimate per-axis zero-$g$ bias and sensitivity scale factors ($\pm 2g$ full-scale range, nominal $16384\text{ counts}/g$):
+Using `firmware/accelerometer_average/accelerometer_average.ino` ($N = 200$ samples averaged per static orientation), six orthogonal orientation means were recorded in `data/accelerometer-six-position.txt`. Per-axis offset (`bias`) and sensitivity (`scale`) for the nominal $\pm 2g$ range ($16384\text{ counts}/g$) were estimated from opposite faces:
 
 $$a_i = \frac{\text{raw}_i - \text{bias}_i}{\text{scale}_i} \quad [g]$$
 
@@ -33,41 +35,53 @@ $$a_i = \frac{\text{raw}_i - \text{bias}_i}{\text{scale}_i} \quad [g]$$
 | **Y** | $+276.66$ | $16405.48$ | $16384$ |
 | **Z** | $-697.16$ | $16627.08$ | $16384$ |
 
-### Holdout Tilt & Gravity-Vector Validation (`accelerometer_angle.ino`)
-To avoid circular validation on the calibration poses alone, the calibrated gravity vector norm $\|a\| = \sqrt{a_x^2 + a_y^2 + a_z^2}$ and static roll angle $\theta_{\text{acc}} = \text{atan2}(a_y, a_z) \cdot \frac{180}{\pi}$ were tested across independent static and dynamic conditions:
-
-* **Horizontal Baseline ($0^\circ$):** $a_x = -0.02g, a_y = 0.00g, a_z = 1.03g \rightarrow \|a\| = 1.03g$, $\theta_{\text{acc}} \in [-0.3^\circ, +0.4^\circ]$.
-* **Independent $\approx -45^\circ$ Holdout Tilt:** $a_x = 0.00g, a_y = -0.72g, a_z = 0.72g \rightarrow \|a\| = 1.02g$, $\theta_{\text{acc}} = -45.0^\circ$ (matching theoretical $\sin 45^\circ \approx 0.707g$ equal-axis projection).
-* **Vertical Edge ($\approx -90^\circ$, resting on header pins):** $a_x = -0.01g, a_y = -1.00g, a_z = 0.10g \rightarrow \|a\| = 1.00g$, $\theta_{\text{acc}} = -84.3^\circ$.
-* **Dynamic Shaking Disturbance:** Rapid hand acceleration saturated the $\pm 2g$ full-scale range ($a_x, a_y \approx 1.98g$, $\|a\| = 3.40g$), corrupting the accelerometer-only tilt estimate to $134.2^\circ$ and motivating gyroscope sensor fusion.
+### Reported Static Spot Checks (`accelerometer_angle.ino`)
+Static roll around the sensor X-axis is estimated from gravity projections on the Y–Z plane as $\theta_{\text{acc}} = \text{atan2}(a_y, a_z) \cdot \frac{180}{\pi}$ (valid primarily for rotation about X under zero linear acceleration). During bench checks in Serial Monitor (`115200 baud`), the following manual poses were observed (reported spot checks without an independent metrological angle fixture):
+* **Flat on table ($\approx 0^\circ$):** $a_x = -0.02g, a_y = 0.00g, a_z = 1.03g \rightarrow \|a\| = 1.03g$, $\theta_{\text{acc}} \in [-0.3^\circ, +0.4^\circ]$.
+* **Manual $\approx -45^\circ$ tilt:** $a_x = 0.00g, a_y = -0.72g, a_z = 0.72g \rightarrow \|a\| = 1.02g$, $\theta_{\text{acc}} = -45.0^\circ$.
+* **Resting on side header pins ($\approx -90^\circ$):** $a_x = -0.01g, a_y = -1.00g, a_z = 0.10g \rightarrow \|a\| = 1.00g$, $\theta_{\text{acc}} = -84.3^\circ$.
+* **Vigorous hand shaking:** Individual axes reached $\approx 1.98g$ (near the $\pm 2g$ per-axis ceiling, $\|a\| = 3.40g$), producing transient $\theta_{\text{acc}}$ values up to $134.2^\circ$ due to linear acceleration.
 
 ---
 
-## 3. Complementary Sensor Fusion & Experimental Results
+## 3. One-Axis Complementary Sensor Fusion & Telemetry Analysis
 
-Implemented in `firmware/complementary_filter/complementary_filter.ino`, the estimator performs a 500-sample stationary gyroscope bias calibration at startup, tracks loop execution intervals $\Delta t$ via `micros()` (effective sampling rate $41.87\text{ Hz}$, mean $\Delta t = 23.88\text{ ms}$), and fuses gyroscope integration with accelerometer gravity reference ($\alpha = 0.98$):
+Implemented in `firmware/complementary_filter/complementary_filter.ino`, the sketch averages 500 stationary gyro-X samples at startup to estimate zero-rate offset, measures loop intervals $\Delta t$ via `micros()`, and updates a scalar complementary filter ($\alpha = 0.98$, time constant $\tau \approx 1.17\text{ s}$ at the mean polling rate of $41.87\text{ Hz}$, $\Delta t_{\text{mean}} = 23.88\text{ ms}$):
 
 $$\theta_{\text{fused}}[k] = \alpha \left(\theta_{\text{fused}}[k-1] + \omega_x[k]\Delta t\right) + (1 - \alpha)\theta_{\text{acc}}[k]$$
 
 ![Complementary Filter Comparison](results/plots/complementary_filter_comparison.png)
 
-### Key Measured Performance Metrics (`data/complementary_filter_log.csv`, 1560 samples / 37.2 s)
+### Measured Interval Statistics (`data/complementary_filter_log.csv`, 1,560 samples / 37.234 s)
 
-| Experimental Phase | Accelerometer Only (`acc_roll_deg`) | Gyroscope Only (`gyro_roll_deg`) | Complementary Filter (`fused_roll_deg`) | Key Engineering Observation |
-| :--- | :--- | :--- | :--- | :--- |
-| **Phase 1: Stationary Baseline ($0\text{–}5.5\text{ s}$)** | Mean: $+0.74^\circ$<br>Std: $0.142^\circ$ | Mean: $+0.55^\circ$<br>Std: $0.056^\circ$ | Mean: $+0.69^\circ$<br>Std: **$0.030^\circ$** | **$4.69\times$ reduction** in stationary RMS noise vs. raw accelerometer. |
-| **Phase 2: Tilted Hold ($10.5\text{–}18.0\text{ s}$)** | Mean: $-43.68^\circ$<br>Std: $0.560^\circ$ | Mean: $-42.34^\circ$<br>*(drifting)* | Mean: **$-43.66^\circ$**<br>Std: **$0.239^\circ$** | Accurately tracks $-43.7^\circ$ hold while reducing hand-tremor variance by **$2.35\times$**. |
-| **Phase 3: Impact & Shaking ($20.0\text{–}37.2\text{ s}$)** | Spike up to **$-47.85^\circ$**<br>Std: $2.28^\circ$ | Accumulated drift: **$+3.06^\circ$** ($+0.085^\circ/\text{s}$) | Mean: $-1.44^\circ$<br>Std: **$1.35^\circ$** | Rejects $-48.0^\circ$ table-impact acceleration spike and eliminates cumulative gyro drift. |
+| Interval / Event | Samples ($n$) | Accelerometer Tilt (`acc_roll_deg`) | Integrated Gyro X (`gyro_roll_deg`) | Complementary Filter (`fused_roll_deg`) | Observed Behaviour |
+| :--- | ---: | :--- | :--- | :--- | :--- |
+| **Interval 1: Stationary (`0.0–5.5 s`)** | 232 | Mean: $+0.74^\circ$<br>Std: $0.142^\circ$ | Mean: $+0.55^\circ$<br>Std: $0.056^\circ$ | Mean: $+0.69^\circ$<br>Std: **$0.030^\circ$** | **$4.69\times$ lower output standard deviation** (scatter around mean) than accelerometer tilt. |
+| **Interval 2: Tilted Hold (`10.5–18.0 s`)** | 312 | Mean: $-43.68^\circ$<br>Std: $0.560^\circ$ | Mean: $-42.34^\circ$<br>Std: $0.216^\circ$ | Mean: $-43.66^\circ$<br>Std: **$0.239^\circ$** | **$2.35\times$ lower standard deviation** ($5.50\times$ lower variance) than raw accelerometer tilt during manual hold. |
+| **Impact Event (`t = 20.256 s`)** | 1 | **$-47.85^\circ$** | $+3.67^\circ$ | **$+0.19^\circ$** *(prev: $-2.04^\circ$)* | Attenuates the transient table-impact spike (`acc - fused = -48.04°`), though $2\%$ of single-sample linear acceleration still enters the recurrence. |
+| **Interval 3: Dynamic Shaking (`22.0–37.234 s`)** | 639 | Mean: $-1.44^\circ$<br>Std: $2.278^\circ$ | Mean: $+1.34^\circ$<br>Std: $1.386^\circ$ | Mean: $-1.44^\circ$<br>Std: **$1.345^\circ$** | Reduces dynamic scatter; by $37.234\text{ s}$, `gyro_roll_deg` ($+2.24^\circ$) and `fused_roll_deg` ($-0.74^\circ$) diverge by **$2.98^\circ$** as the filter tracks the long-term gravity reference. |
+
+*Limitations:* Without an external optical/mechanical angle reference, these metrics quantify relative estimator scatter and divergence rather than absolute angular accuracy. The scalar update assumes rotation predominantly about the X-axis and does not handle $\pm 180^\circ$ `atan2` wrap-around or 3D Euler coupling.
 
 ---
 
-## 4. Repository Structure
+## 4. Quick Start & Reproduction
 
-* `firmware/accelerometer_average/accelerometer_average.ino` — 200-sample averaging sketch for static 6-position calibration.
-* `firmware/accelerometer_angle/accelerometer_angle.ino` — Calibrated $g$-unit conversion, vector norm verification, and `atan2` roll estimation.
-* `firmware/complementary_filter/complementary_filter.ino` — Startup gyro bias calibration, `micros()` integration, and real-time complementary filter with CSV serial telemetry.
-* `data/` — Recorded 6-orientation calibration dataset and 1560-sample (`41.9 Hz`) real-time sensor fusion CSV log.
-* `results/plots/` — Time-series comparison and isolated sensor error plots.
+1. **Firmware Upload (Arduino IDE):** Select `Arduino Uno` (`ATmega328P`), connect the MPU-6500 as above, and upload:
+   * `firmware/accelerometer_average/accelerometer_average.ino` (`9600 baud`) for 200-sample static calibration averages.
+   * `firmware/accelerometer_angle/accelerometer_angle.ino` (`115200 baud`) for calibrated $g$-units, vector norm, and static roll.
+   * `firmware/complementary_filter/complementary_filter.ino` (`115200 baud`) for fused CSV output. Keep the board stationary for the first ~2 seconds after reset during 500-sample gyro bias calibration.
+2. **Plot & Statistics Reproduction (Python 3):**
+   ```bash
+   pip install pandas matplotlib
+   python scripts/plot_results.py
 
 ## 5. Next Steps (Milestone D)
+
 * Design a mechanically constrained 1-DOF tiltable test rig with an SG90 servo actuator and separate power supply to close an external P/PD attitude stabilisation loop.
+
+---
+
+## 6. Provenance & Acknowledgements
+
+Developed by Andrey Maltsev (Year 1 BEng EEE, University of Manchester) as a hands-on learning project. Hardware wiring, sensor probing (`WHO_AM_I = 0x70`), 6-position data collection, bench experiments, and Serial telemetry capture were performed by the student; AI assistants (ChatGPT / Gemini) were used for roadmap structuring, code/plotting templates, and documentation review.

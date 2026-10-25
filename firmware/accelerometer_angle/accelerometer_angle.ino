@@ -52,10 +52,10 @@ void loop() {
   // 2. Calculate total gravity vector norm |a| = sqrt(ax^2 + ay^2 + az^2)
   float magnitude = sqrt(ax * ax + ay * ay + az * az);
 
-  // 3. Estimate static Roll tilt angle around the X-axis in degrees[cite: 2]
+  // 3. Estimate static Roll tilt angle around the X-axis in degrees
   float roll_deg = atan2(ay, az) * 180.0f / PI;
 
-  // 4. Print values for viewing and logging[cite: 2]
+  // 4. Print values for viewing and logging
   Serial.print("ax: ");   Serial.print(ax, 2);
   Serial.print(" g | ay: "); Serial.print(ay, 2);
   Serial.print(" g | az: "); Serial.print(az, 2);
