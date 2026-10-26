@@ -1,4 +1,3 @@
-```python
 import pandas as pd
 import matplotlib.pyplot as plt
 
@@ -19,7 +18,7 @@ for name, mask in intervals.items():
     print(sub.agg(['mean', 'median', 'min', 'max', 'std']).round(3))
 
 plt.rcParams['figure.dpi'] = 150
-fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(11.5, 7.8), sharex=True, gridspec_kw={'height_ratios': [2.1, 1.3]})
+fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(11.5, 8.0), sharex=True, gridspec_kw={'height_ratios': [2.1, 1.3]})
 
 ax1.plot(df['time_s'], df['acc_roll_deg'], color='#e74c3c', alpha=0.45, linewidth=1.0, label='Accelerometer Tilt (acc_roll_deg)')
 ax1.plot(df['time_s'], df['gyro_roll_deg'], color='#2980b9', linestyle='--', linewidth=1.6, label='Integrated Gyroscope Roll (gyro_roll_deg)')
@@ -48,7 +47,7 @@ ax2.set_xlabel('Time (s)', fontsize=11)
 ax2.set_ylabel('Difference (deg)', fontsize=11)
 ax2.set_ylim(-53, 18)
 ax2.grid(True, linestyle=':', alpha=0.7)
-ax2.legend(loc='lower left', fontsize=8.8, framealpha=0.94)
+ax2.legend(loc='lower left', fontsize=8.8, framealpha=0.95)
 
 plt.tight_layout()
 plt.savefig('results/plots/complementary_filter_comparison.png', bbox_inches='tight')
